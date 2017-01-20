@@ -10,29 +10,48 @@
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context="org.kingsschools.cyberknights4911.bluetoothpusher.MainActivity">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:id="@+id/textView_Log"
-        android:layout_alignParentTop="true"
-        android:layout_alignParentStart="true" />
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
 
-    <Button
-        android:text="Send"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:id="@+id/button_Send"
-        android:onClick="sendButton_Clicked"
-        android:layout_alignParentBottom="true"
-        android:layout_alignParentEnd="true" />
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
 
-    <TextView
-        android:text="TextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:id="@+id/textView_TargetDevice"
-        android:textAppearance="@style/TextAppearance.AppCompat.Title"
-        android:layout_alignBaseline="@+id/button_Send"
-        android:layout_alignBottom="@+id/button_Send"
-        android:layout_toEndOf="@+id/textView_Log" />
+            <TextView
+                android:text="Target Device"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:id="@+id/textView_TargetDevice"
+                android:textAppearance="@style/TextAppearance.AppCompat.Title"
+                android:layout_centerHorizontal="true"
+                android:layout_weight="1" />
+
+            <Button
+                android:text="Select Device"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:id="@+id/button_SelectDevice"
+                android:layout_weight="0" />
+        </LinearLayout>
+
+        <TextView
+            android:text="Log"
+            android:id="@+id/textView_Log"
+            android:layout_height="fill_parent"
+            android:layout_width="match_parent"
+            android:layout_weight="1" />
+
+        <Button
+            android:text="Send"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/button_Send"
+            android:onClick="sendButton_Clicked"
+            android:layout_below="@id/textView_Log"
+            android:layout_weight="0" />
+    </LinearLayout>
+
 </RelativeLayout>

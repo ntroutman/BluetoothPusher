@@ -21,20 +21,23 @@ import java.util.UUID;
 import java.util.zip.CRC32;
 
 /**
- * This is a bluetooth service that allows for pushing files and directories over bluetooth to 
+ * This is a bluetooth service that allows for pushing files and directories over bluetooth to
  * receiving server.
  */
-public class CyberKnightFilePusherService {
+public class BluetoothPusherService {
+    // Uniquely identifies the CyberKnight Pusher Service to the receiving device. These must match on the
+    // client and server for  succesfully Bluetooth RFComm connection to be made.
+    public static final UUID CYBERKNIGHT_BLUETOOTH_PUSHER_UUID = UUID.fromString("2d31ac7d-0d4a-48dd-8136-2f6a9b71a3f4");
 
-    private static final String TAG = "4911FilePusher";
+    private static final String TAG = "BluetoothPusher";
     private Handler mHandler;
-    private Set<ConnectedThread> mThreads = new HashSet<>();
+    private Set<ConnectedPusher> mThreads = new HashSet<>();
 
-    /** 
+    /**
      * Defines constants used when transmitting messages between the
      * service and the UI via a Handler.
      */
-    public interface UIHandlerMessageTypes{
+    public interface UIHandlerMessageTypes {
         public static final int SEND_SUCCESS = 0;
         public static final int SEND_FAILED = 1;
         public static final int LOG = 2;
@@ -46,6 +49,9 @@ public class CyberKnightFilePusherService {
      */
     private interface FilePushMessage {
         public static final byte TYPE_FILE = 1;
+        public static final byte TYPE_DIRECTORY = 2;
+        public static final byte TYPE_STOP = 3;
+
         public static final byte COMPRESSION_NONE = 0;
     }
 
@@ -53,21 +59,26 @@ public class CyberKnightFilePusherService {
      * @param handler a handler service to publish notifications over such as
      *                status updates during file pushes.
      */
-    public CyberKnightFilePusherService(Handler handler) {
+    public BluetoothPusherService(Handler handler) {
         this.mHandler = handler;
     }
 
 
-    public ConnectedPusher connect(BluetoothDevice device) throws IOException {
-        BluetoothSocket socket = device.createRfcommSocketToServiceRecord(UUID.fromString("2d31ac7d-0d4a-48dd-8136-2f6a9b71a3f4"));
-        ConnectedPusher thread = new ConnectedPusher(socket);
-        thread.start();
-        mThreads.add(thread);
-        return thread;
+    public ConnectedPusher connect(BluetoothDevice device) {
+        try {
+
+            BluetoothSocket socket = device.createRfcommSocketToServiceRecord(UUID.fromString("2d31ac7d-0d4a-48dd-8136-2f6a9b71a3f4"));
+            ConnectedPusher thread = new ConnectedPusher(socket);
+            thread.start();
+            mThreads.add(thread);
+            return thread;
+        } catch (IOException e) {
+            throw new BluetoothConnectionException();
+        }
     }
 
     public void stop() {
-        for (ConnectedThread thread : mThreads) {
+        for (ConnectedPusher thread : mThreads) {
             thread.cancel();
         }
     }
@@ -75,13 +86,13 @@ public class CyberKnightFilePusherService {
 
     public class ConnectedPusher extends Thread {
         private final BluetoothSocket mmSocket;
-        private final InputStream mmInStream;
-        private final DataOutputStream mmOutStream;
+        private InputStream mmInStream;
+        private DataOutputStream mmOutStream;
         private byte[] mmWriteBuffer; // mmBuffer store for the stream
         private byte[] mmReadBuffer; // mmBuffer store for the stream
 
         public ConnectedPusher(BluetoothSocket socket) throws IOException {
-            
+
             Log.d(TAG, "Created thread for: " + socket.getRemoteDevice().getName());
             mmSocket = socket;
             mmSocket.connect();
@@ -99,7 +110,7 @@ public class CyberKnightFilePusherService {
             } catch (IOException e) {
                 Log.e(TAG, "Error occurred when creating input stream", e);
             }
-            
+
             try {
                 tmpOut = socket.getOutputStream();
                 if (tmpOut == null) {
@@ -109,12 +120,12 @@ public class CyberKnightFilePusherService {
             } catch (IOException e) {
                 Log.e(TAG, "Error occurred when creating output stream", e);
             }
-  
+
             mmWriteBuffer = new byte[1024];
         }
 
         /**
-         * Starts the pusher listening for responses from the server. 
+         * Starts the pusher listening for responses from the server.
          * (Currently the server never responds with anything)
          */
         public void run() {
@@ -140,14 +151,24 @@ public class CyberKnightFilePusherService {
          */
         public void sendFile(File file) {
             try {
-                writeFile(file);
-                sendSuccessMessage(File file);
+                writeFile(file, null);
+                sendSuccessMessage(file);
             } catch (IOException e) {
                 Log.e(TAG, "Error occurred when sending data", e);
-                sendFailureMessage(File file);
+                sendFailureMessage(file);
             }
         }
-        
+
+        public void sendDirectory(File directory) {
+            try {
+                writeDirectory(directory, new File("/"));
+                sendSuccessMessage(directory);
+            } catch (IOException e) {
+                Log.e(TAG, "Error occurred when sending data", e);
+                sendFailureMessage(directory);
+            }
+        }
+
         // TODO Use the file name in the message
         // TODO Get rid of the mmReadBuffer and use a dedicated buffer for message sending...if needed
         private void sendSuccessMessage(File file) {
@@ -155,7 +176,7 @@ public class CyberKnightFilePusherService {
             Message writtenMsg = mHandler.obtainMessage(UIHandlerMessageTypes.SEND_SUCCESS, -1, -1, mmReadBuffer);
             writtenMsg.sendToTarget();
         }
-        
+
         // TODO Use the file name in the message
         // TODO Get rid of the mmReadBuffer and use a dedicated buffer for message sending...if needed
         private void sendFailureMessage(File file) {
@@ -163,6 +184,8 @@ public class CyberKnightFilePusherService {
             Message writtenMsg = mHandler.obtainMessage(UIHandlerMessageTypes.SEND_FAILED, -1, -1, mmReadBuffer);
             writtenMsg.sendToTarget();
         }
+
+        // TODO Break out messages to seperate classes
 
         // File Pusher Protocol
         // The file pusher protocol is a simple order dependent protocol for copying files
@@ -176,6 +199,8 @@ public class CyberKnightFilePusherService {
         // 1 byte - Message Type (FILE = 0x01)
         // 2 byte - Filename Length
         // n byte - Filename
+        // 2 byte - Container Name (Target Directory) Length
+        // n byte - Container Name (Target Directory)
         // 1 byte - Compression: 0 = None
         // 4 byte - File length
         // n byte - File contents
@@ -185,22 +210,33 @@ public class CyberKnightFilePusherService {
         // 1 byte - Message Type (DIRECTORY = 0x02)
         // 2 byte - Directory Name Length
         // n byte - Directory Name
-        private void writeFile(File file) throws IOException {
+        // 2 byte - Child Count
+        //
+        // Stop Message Type
+        // 1 byte - Message Type (STOP = 0x03)
+        private void writeFile(File file, File destinationDirectory) throws IOException {
             Log.d(TAG, "Sending File: " + file);
 
             // type
             mmOutStream.writeByte(FilePushMessage.TYPE_FILE);
 
-            // filename chunk            
-            byte[] fname = file.getName().getBytes(StandardCharsets.UTF_8);
-            mmOutStream.writeShort(fname.length);
-            mmOutStream.write(fname);
-            
+            // filename chunk
+//            byte[] fname = file.getName().getBytes(StandardCharsets.UTF_8);
+//            mmOutStream.writeShort(fname.length);
+//            mmOutStream.write(fname);
+            mmOutStream.writeChars(file.getName());
+
+            if (destinationDirectory != null) {
+                mmOutStream.writeChars(destinationDirectory.getName());
+            } else {
+                mmOutStream.writeShort(0);
+            }
+
             // compression
             mmOutStream.writeByte(FilePushMessage.COMPRESSION_NONE);
 
             // file chunk
-            mmOutStream.writeInt(file.length());
+            mmOutStream.writeInt((int) file.length());
             // copy the file to the stream
             CRC32 crc = new CRC32();
             FileInputStream inputStream = new FileInputStream(file);
@@ -215,10 +251,23 @@ public class CyberKnightFilePusherService {
             mmOutStream.writeLong(crc.getValue());
             Log.d(TAG, "Sent: " + crc.getValue());
         }
-        
-        private void writeDirectory(File dir) throws IOException {
-            // Walk the directory send files over
-            // Will need some way to tell write file to use more than just the filename
+
+        private void writeDirectory(File dir, File destinationContainer) throws IOException {
+            File[] children = dir.listFiles();
+            mmOutStream.writeInt(FilePushMessage.TYPE_DIRECTORY);
+            mmOutStream.writeChars(destinationContainer.getName());
+            mmOutStream.writeShort(children.length);
+            for (File subfile : children) {
+                if (subfile.isFile()) {
+                    writeFile(subfile, destinationContainer);
+                } else if (subfile.isDirectory()) {
+                    writeDirectory(subfile, new File(destinationContainer, subfile.getName()));
+                }
+            }
+        }
+
+        private void writeStop() throws IOException {
+            mmOutStream.writeInt(FilePushMessage.TYPE_STOP);
         }
 
         // Call this method from the main activity to shut down the connection.
